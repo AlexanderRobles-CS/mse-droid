@@ -4,6 +4,7 @@
 
 // Pin Connections
 int builtInLed = 2;
+int df_player_busy_pin = 36;
 
 // MOTOR 1 - Front 
 int ENApin_motor_1 = 14; // Motor 1 speed
@@ -29,14 +30,25 @@ int IN4pin_motor_4 = 22; // Motor 4 dir2
 int motorSpeed = 0;
 int reverseSpeed = 0;
 
+// DFPlayerMini Variables
 HardwareSerial mySerial(2);
 DFRobotDFPlayerMini player;
-String line;
-char command;
-int isPaused = 0;
-int repeat = 0;
 
+// Sound Variables
+unsigned long lastEventTime = 0;
+unsigned long nextInterval = 0;
+const unsigned long MIN_INTERVAL = 5000;   // 5 seconds
+const unsigned long MAX_INTERVAL = 30000;  // 30 seconds
+int soundPlaying = 0;
+
+// LED Variables
+unsigned long lastFlickerTime = 0;
+unsigned long flickerInterval = 100;  // initial delay
+
+// Controller Variables
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+uint16_t lastButtons = 0;
+uint8_t lastDpad = 0;
 
 // This callback gets called any time a new gamepad is connected.
 // Up to 4 gamepads can be connected at the same time.
@@ -102,6 +114,13 @@ void dumpGamepad(ControllerPtr ctl) {
   );
 }
 
+void playSound(){
+  int sound = random(1, 24);
+  player.play(sound);
+  Serial.print("Now playing track: ");
+  Serial.println(sound);
+}
+
 void setSpeed(int leftSpeed, int rightSpeed){
   analogWrite(ENApin_motor_1, leftSpeed);
   analogWrite(ENApin_motor_3, leftSpeed);
@@ -113,106 +132,111 @@ void setSpeed(int leftSpeed, int rightSpeed){
 // ========= GAME CONTROLLER ACTIONS SECTION ========= //
 
 void processGamepad(ControllerPtr ctl) {
-  // There are different ways to query whether a button is pressed.
-  // By query each button individually:
-  //  a(), b(), x(), y(), l1(), etc...
+  uint16_t currentButtons = ctl->buttons();
+  uint8_t currentDpad = ctl->dpad();
  
-  //== PS4 X button = 0x0001 ==//
-  if (ctl->buttons() == 0x0001) {
-    // code for when X button is pushed
+  // ===== BUTTONS ===== //
+
+  //== PS4 X button ==//
+  if (currentButtons & 0x0001) {
     digitalWrite(builtInLed, HIGH);
-  }
-  if (ctl->buttons() != 0x0001) {
-    // code for when X button is released
+  } else {
     digitalWrite(builtInLed, LOW);
   }
 
-  //== PS4 Square button = 0x0004 ==//
-  if (ctl->buttons() == 0x0004) {
-    // code for when square button is pushed
-  }
-  if (ctl->buttons() != 0x0004) {
-  // code for when square button is released
+  //== PS4 Square button (0x0004) ==//
+  if ((currentButtons & 0x0004) && !(lastButtons & 0x0004)) {
+    // square JUST pressed
   }
 
-  //== PS4 Triangle button = 0x0008 ==//
-  if (ctl->buttons() == 0x0008) {
-    int sound = random(1, 24);
-    player.play(sound);
-    Serial.print("Now playing track: ");
-    Serial.println(sound); 
+  if (!(currentButtons & 0x0004) && (lastButtons & 0x0004)) {
+    // square JUST released
   }
 
-  if (ctl->buttons() != 0x0008) {
-    // code for when triangle is released
+  //== PS4 Triangle button ==//
+  if ((currentButtons & 0x0008) && !(lastButtons & 0x0008)) {
+    playSound();
   }
 
-  //== PS4 Circle button = 0x0002 ==//
-  if (ctl->buttons() == 0x0002) {
-    // code for when circle button is pushed
-  }
-  if (ctl->buttons() != 0x0002) {
-    // code for when circle button is released
+  if (!(currentButtons & 0x0008) && (lastButtons & 0x0008)) {
+    // triangle JUST released
   }
 
-  //== PS4 Dpad UP button = 0x01 ==//
-  if (ctl->dpad() == 0x01) {
+  //== PS4 Circle button (0x0002) ==//
+  if ((currentButtons & 0x0002) && !(lastButtons & 0x0002)) {
+    // circle JUST pressed
+  }
+
+  if (!(currentButtons & 0x0002) && (lastButtons & 0x0002)) {
+    // circle JUST released
+  }
+
+  //== PS4 R1 button (0x0020) ==//
+  if ((currentButtons & 0x0020) && !(lastButtons & 0x0020)) {
+    // R1 JUST pressed
+  }
+
+  if (!(currentButtons & 0x0020) && (lastButtons & 0x0020)) {
+    // R1 JUST released
+  }
+
+  //== PS4 L1 button (0x0010) ==//
+  if ((currentButtons & 0x0010) && !(lastButtons & 0x0010)) {
+    // L1 JUST pressed
+  }
+
+  if (!(currentButtons & 0x0010) && (lastButtons & 0x0010)) {
+    // L1 JUST released
+  }
+
+  // ===== DPAD ===== //
+  //== Dpad UP ==//
+  if ((currentDpad == 0x01) && (lastDpad != 0x01)) {
     int currentVol = player.readVolume();
-    if (currentVol < 30) {
-      player.volume(currentVol + 1);
-    }
+    currentVol = constrain(currentVol + 5, 0, 30);
+    player.volume(currentVol);
+
     Serial.print("Current Volume: ");
-    Serial.println(player.readVolume());
+    Serial.println(currentVol);
   }
 
-  if (ctl->dpad() != 0x01) {
-    // code for when dpad up is released
+  if ((currentDpad != 0x01) && (lastDpad == 0x01)) {
+    // UP JUST released
   }
 
-  //==PS4 Dpad DOWN button = 0x02==//
-  if (ctl->dpad() == 0x02) {
+  //== Dpad DOWN ==//
+  if ((currentDpad == 0x02) && (lastDpad != 0x02)) {
     int currentVol = player.readVolume();
-    if (currentVol > 0) {
-      player.volume(currentVol - 1);
-    }
+    currentVol = constrain(currentVol - 5, 0, 30);
+    player.volume(currentVol);
+
     Serial.print("Current Volume: ");
-    Serial.println(player.readVolume());
-  }
-  if (ctl->dpad() != 0x02) {
-    // code for when dpad down button is released
+    Serial.println(currentVol);
   }
 
-  //== PS4 Dpad LEFT button = 0x08 ==//
-  if (ctl->dpad() == 0x08) {
-    // code for when dpad left button is pushed
-  }
-  if (ctl->dpad() != 0x08) {
-    // code for when dpad left button is released
+  if ((currentDpad != 0x02) && (lastDpad == 0x02)) {
+    // DOWN JUST released
   }
 
-  //== PS4 Dpad RIGHT button = 0x04 ==//
-  if (ctl->dpad() == 0x04) {
-    // code for when dpad right button is pushed
-  }
-  if (ctl->dpad() != 0x04) {
-    // code for when dpad right button is released
+  //== Dpad LEFT (0x08) ==//
+  if ((currentDpad == 0x08) && (lastDpad != 0x08)) {
+    // LEFT JUST pressed
   }
 
-  //== PS4 R1 trigger button = 0x0020 ==//
-  if (ctl->buttons() == 0x0020) {
-    // code for when R1 button is pushed
-  }
-  if (ctl->buttons() != 0x0020) {
-    // code for when R1 button is released
+  if ((currentDpad != 0x08) && (lastDpad == 0x08)) {
+    // LEFT JUST released
   }
 
-  //== PS4 L1 trigger button = 0x0010 ==//
-  if (ctl->buttons() == 0x0010) {
-    // code for when L1 button is pushed
+  //== Dpad RIGHT (0x04) ==//
+  if ((currentDpad == 0x04) && (lastDpad != 0x04)) {
+    // RIGHT JUST pressed
   }
-  if (ctl->buttons() != 0x0010) {
-    // code for when L1 button is released
+
+  if ((currentDpad != 0x04) && (lastDpad == 0x04)) {
+    // RIGHT JUST released
   }
+
+  // ====== MOTOR LOGIC =====
 
   int r2 = ctl->throttle(); 
   motorSpeed = map(r2, 0, 1023, 0, 255);
@@ -309,7 +333,9 @@ void processGamepad(ControllerPtr ctl) {
     setSpeed(0, 0);
   }
 
-  dumpGamepad(ctl);
+  lastButtons = currentButtons;
+  lastDpad = currentDpad;
+  // dumpGamepad(ctl);
 }
 
 void processControllers() {
@@ -328,6 +354,8 @@ void processControllers() {
 // Arduino setup function. Runs in CPU 1
 void setup() {
   pinMode(builtInLed, OUTPUT);
+  pinMode(df_player_busy_pin, INPUT);
+
   pinMode(IN1pin_motor_1, OUTPUT);
   pinMode(IN2pin_motor_1, OUTPUT);
   pinMode(ENApin_motor_1, OUTPUT);
@@ -380,8 +408,11 @@ void setup() {
   digitalWrite(builtInLed, LOW);
 
   player.setTimeOut(500);  // Serial timeout 500ms
-  player.volume(15);       // Volume 5
+  player.volume(30);       // Set volume to max 
   player.EQ(0);            // Normal equalization
+
+  randomSeed(analogRead(0));  // seed randomness
+  nextInterval = random(MIN_INTERVAL, MAX_INTERVAL);
 
   // Setup the Bluepad32 callbacks
   BP32.setup(&onConnectedController, &onDisconnectedController);
@@ -409,12 +440,36 @@ void loop() {
   if (dataUpdated)
     processControllers();
   
+  if (millis() - lastEventTime >= nextInterval) {
+    playSound();
+    lastEventTime = millis();
+    nextInterval = random(MIN_INTERVAL, MAX_INTERVAL); 
+  }
+
+  soundPlaying = digitalRead(df_player_busy_pin);
+  // ===== Flicker LEDs While Track is Playing =====
+  if (soundPlaying == LOW) {  // LOW = track is playing
+    if (millis() - lastFlickerTime >= flickerInterval) {
+
+      // generate random flicker value
+      byte flicker = random(0, 256);
+
+      // emulate LED flicker by printing the value
+      Serial.print("FLICKERING: ");
+      Serial.println(flicker);
+
+      // ===== timing updates =====
+      lastFlickerTime = millis();
+      flickerInterval = random(50, 200);  // next random flicker delay
+    }
+  }
+
     // The main loop must have some kind of "yield to lower priority task" event.
     // Otherwise, the watchdog will get triggered.
     // If your main loop doesn't have one, just add a simple `vTaskDelay(1)`.
     // Detailed info here:
     // https://stackoverflow.com/questions/66278271/task-watchdog-got-triggered-the-tasks-did-not-reset-the-watchdog-in-time
 
-    // vTaskDelay(1);
-  delay(150);
+  vTaskDelay(1);
+  // delay(150);
 }
